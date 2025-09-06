@@ -10,4 +10,17 @@ async function GeneratorRes(content){
     return response.text;
 }
 
-module.exports = {GeneratorRes};
+async function generateVector(content) {
+
+    const response = await ai.models.embedContent({
+        model: 'gemini-embedding-001',
+        contents: content,
+        config :{
+            outputDimensionality : 768
+        }
+    });
+
+    return response.embeddings[0].values
+}
+
+module.exports = {GeneratorRes , generateVector};
