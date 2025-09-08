@@ -7,7 +7,14 @@ const memoryModel = require("../models/memory.model");
 const { createMemory, queryMemory } = require("./vector.service");
 
 async function initSocketServer(httpServer) {
-  const io = new Server(httpServer, {});
+  
+  const io = new Server(httpServer, {
+     cors: {
+            origin: "http://localhost:5173",
+            allowedHeaders: [ "Content-Type", "Authorization" ],
+            credentials: true
+        }
+  });
 
   io.use(async (socket, next) => {
     const cookies = cookie.parse(socket.handshake.headers?.cookie || "");
@@ -24,6 +31,7 @@ async function initSocketServer(httpServer) {
       });
 
       socket.user = user;
+      console.log(socket.user );
       next();
     } catch (error) {
       next(new Error("Unautharized user : Invalid token"));
@@ -32,38 +40,37 @@ async function initSocketServer(httpServer) {
 
   io.on("connection", (socket) => {
     socket.on("user-message", async (UserMessage) => {
+    
+    console.log(socket.user);
+    console.log(UserMessage);  
 
-      try {
-        const message = await memoryModel.create({
+    const [message , vector] = await Promise.all([
+        memoryModel.create({
           user: socket.user._id,
           chat: UserMessage.chat,
           content: UserMessage.content,
-          role: "user",
-        });
-        console.log("Message saved:", message);
-      } catch (err) {
-        console.error("Failed to save message:", err);
-      }
+      role: "user",
+      }),
+      generateVector(UserMessage.content)
+    ]);
 
-      const vector = await generateVector(UserMessage.content);
-
-      const memory = await queryMemory({
+    const [memory] = await Promise.all([
+        queryMemory({
         queryVector: vector,
         limit: 3,
         metadata: {},
-      });
-
-      console.log(memory);
-
-      await createMemory({
+      }),
+      
+    createMemory({
         vectors: vector,
-        messageId: "845782347587267",
+        messageId: message._id,
         metadata: {
           chat: UserMessage.chat,
           user: socket.user._id,
           actualData: UserMessage.content,
         },
-      });
+      })
+    ])
 
       let chatHistory = await memoryModel
         .find({
@@ -89,14 +96,22 @@ async function initSocketServer(httpServer) {
 
       const AiResponse = await GeneratorRes([...ltm,...stm]);
 
-      const responseMessage = await memoryModel.create({
+      console.log(AiResponse);
+
+      socket.emit("Ai-response", {
+        Content: AiResponse,
+        Chat: UserMessage.chat,
+      });
+
+     const[responseMessage , responseVector] = await Promise.all([
+        memoryModel.create({
         user: socket.user._id,
         chat: UserMessage.chat,
         content: AiResponse,
         role: "model",
-      });
-
-      const responseVector = await generateVector(AiResponse);
+      }),
+      generateVector(AiResponse),
+    ]);
 
       await createMemory({
         vectors: responseVector,
@@ -108,10 +123,6 @@ async function initSocketServer(httpServer) {
         },
       });
 
-      socket.emit("Ai-response", {
-        Content: AiResponse,
-        Chat: UserMessage.chat,
-      });
     });
   });
 }
